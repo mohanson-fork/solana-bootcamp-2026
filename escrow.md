@@ -74,7 +74,8 @@ $ yarn add mocha
 ```rust
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
-// token_interface 下的类型支持同时兼容经典 token program 和 token 2022 program, 这是本项目使用 interface 而非 program 的原因.
+// token_interface 下的类型支持同时兼容经典 token program 和 token 2022 program,
+// 这是本项目使用 interface 而非 program 的原因.
 use anchor_spl::token_interface::*;
 
 declare_id!("25Q841qjRsaGQzWSKh5kiEZ9qpXbWMzm3v4ytGXs6PzY");
