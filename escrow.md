@@ -86,8 +86,10 @@ declare_id!("25Q841qjRsaGQzWSKh5kiEZ9qpXbWMzm3v4ytGXs6PzY");
 在写指令之前, 先看我们需要存储什么数据:
 
 ```rust
-#[account]           // anchor 宏, 标记这是一个链上账户结构, 自动添加 8 字节的 discriminator(账户类型标识符).
-#[derive(InitSpace)] // 自动计算该结构体的存储空间大小, 方便后面 init 时计算 space.
+// anchor 宏, 标记这是一个链上账户结构, 自动添加 8 字节的 discriminator(账户类型标识符).
+#[account]
+// 自动计算该结构体的存储空间大小, 方便后面 init 时计算 space.
+#[derive(InitSpace)]
 pub struct Offer {
     pub maker:                  Pubkey,  // alice 的公钥
     pub mint_a:                 Pubkey,  // alice 提供的代币 mint
@@ -95,7 +97,7 @@ pub struct Offer {
     pub offer_id:               u64,     // 唯一 id, 支持一个 maker 发多个报价
     pub token_a_offered_amount: u64,     // alice 愿意提供多少代币 a
     pub token_b_wanted_amount:  u64,     // alice 期望获得多少代币 b
-    pub bump:                   u8,      // pda 的 canonical bump, 避免在后续 cpi 调用时重新计算, 节省计算资源.
+    pub bump:                   u8,      // pda 的 bump, 避免重新计算, 节省计算资源.
 }
 ```
 
@@ -131,10 +133,14 @@ pub struct MakeOffer<'info> {
     pub maker: Signer<'info>,
 
     // 接下来写两种代币的 mint 账户. 分别命名为 mint_a 和 mint_b.
-    #[account(mint::token_program = token_program)] // 约束确保该 mint 账户属于传入的 token_program, 防止假冒的 mint.
+    // 约束确保该 mint 账户属于传入的 token_program, 防止假冒的 mint.
+    #[account(mint::token_program = token_program)]
+    // 使用 interface_account 而非 account 是为了同时支持 token program
     pub mint_a: InterfaceAccount<'info, Mint>,
-    #[account(mint::token_program = token_program)] // 约束确保该 mint 账户属于传入的 token_program, 防止假冒的 mint.
-    pub mint_b: InterfaceAccount<'info, Mint>,      // 使用 interface_account 而非 account 是为了同时支持 token program 和 token 2022 program.
+
+    // 约束确保该 mint 账户属于传入的 token_program, 防止假冒的 mint.
+    #[account(mint::token_program = token_program)]
+    pub mint_b: InterfaceAccount<'info, Mint>,      和 token 2022 program.
 
     // 接下来是 alice 持有代币 a 的 ata 账户.
     // mut 表示该账户的余额会被修改.
@@ -150,16 +156,26 @@ pub struct MakeOffer<'info> {
     // offer 账户是本项目的核心账户设计. 它里面存储的数据格式就是我们上面定义的 offer 结构体.
     #[account(
         init,
-        payer = maker,                 // 首次创建, 由 payer = maker 支付租金.
-        space = 8 + Offer::INIT_SPACE, // 8 字节 discriminator 加上结构体大小.
-        seeds = [b"offer", maker.key().as_ref(), &offer_id.to_le_bytes()], // pda 的派生种子, 其中 offer_id 是用户传入的唯一 id, 因此同一个 maker 可以同时存在多个 offer.
-        bump // anchor 自动计算并保存 canonical bump.
+        // 首次创建, 由 payer = maker 支付租金.
+        payer = maker,
+        // 8 字节 discriminator 加上结构体大小.
+        space = 8 + Offer::INIT_SPACE,
+        // pda 的派生种子, 其中 offer_id 是用户传入的唯一 id,
+        // 因此同一个 maker 可以同时存在多个 offer.
+        seeds = [b"offer", maker.key().as_ref(), &offer_id.to_le_bytes()],
+        // anchor 自动计算并保存 canonical bump.
+        bump
     )]
     pub offer: Account<'info, Offer>,
-    // seeds 这里有一个关键设计点: 为什么 offer_id 用 to_le_bytes()? 因为 pda seeds 要求 &[u8], 而 u64 必须序列化为字节数组. 用小端序是 solana 生态的惯例.
+    // seeds 这里有一个关键设计点: 为什么 offer_id 用 to_le_bytes()?
+    // 因为 pda seeds 要求 &[u8], 而 u64 必须序列化为字节数组.
+    // 用小端序是 solana 生态的惯例.
 
-    // alice 会把代币托管, 因此我们需要使用一个以 offer pda 为 authority 的 mint_a 的 ata 账户, 这就是托管仓库.
-    // 这里要注意该账号 authority 是 pda 而不是 maker, 这意味着只有持有 pda 签名能力的程序代码才能动用这里的代币, maker 无法直接取走, 保证了双方的安全性.
+    // alice 会把代币托管, 因此我们需要使用一个以 offer pda 为
+    // authority 的 mint_a 的 ata 账户, 这就是托管仓库.
+    // 这里要注意该账号 authority 是 pda 而不是 maker, 这意味着只有
+    // 持有 pda 签名能力的程序代码才能动用这里的代币, maker 无法直接取走,
+    // 保证了双方的安全性.
     #[account(
         init,
         payer = maker,
@@ -187,7 +203,8 @@ pub fn make_offer(
     token_a_offered_amount: u64,
     token_b_wanted_amount: u64,
 ) -> Result<()> {
-    // 首先用 require_keys_neq! 宏检查 mint_a 和 mint_b 不是同一个代币. 如果相同, 则直接返回 SameMint 错误. 早期检验可以避免无意义的后续操作.
+    // 首先用 require_keys_neq! 宏检查 mint_a 和 mint_b 不是同一个代币.
+    // 如果相同, 则直接返回 SameMint 错误. 早期检验可以避免无意义的后续操作.
     require_keys_neq!(
         ctx.accounts.mint_a.key(),
         ctx.accounts.mint_b.key(),
@@ -214,7 +231,8 @@ let transfer_cpi_accounts = TransferChecked {
 let cpi_context = CpiContext::new(*ctx.accounts.token_program.key, transfer_cpi_accounts);
 
 let decimals = ctx.accounts.mint_a.decimals;
-// transfer_checked 是带精度检查的转账函数, decimals 参数是 token 2022 的安全要求, 防止精度欺诈攻击.
+// transfer_checked 是带精度检查的转账函数, decimals 参数是 token 2022 的安全要求
+// 防止精度欺诈攻击.
 transfer_checked(cpi_context, token_a_offered_amount, decimals)?;
 ```
 
@@ -249,7 +267,11 @@ pub struct TakeOffer<'info> {
     #[account(mut)]
     pub maker: SystemAccount<'info>,
 
-    // 接下来几个账号和 make offer 类似, 分别是 mint_a / mint_b / offer 和 offer_token_account: 但是不同的地方在于这里我们使用 Box 包装一下, 将数据分配到堆上, 避免超出 solana 栈大小 4kb 的限制. 这在账户数量较多时是必要的. 如果我们这里不加 Box, 编译的时候会报 warning, 所以我们就加上吧.
+    // 接下来几个账号和 make offer 类似,
+    // 分别是 mint_a / mint_b / offer 和 offer_token_account:
+    // 但是不同的地方在于这里我们使用 Box 包装一下, 将数据分配到堆上,
+    // 避免超出 solana 栈大小 4kb 的限制. 这在账户数量较多时是必要的.
+    // 如果我们这里不加 Box, 编译的时候会报 warning, 所以我们就加上吧.
     #[account(mint::token_program = token_program)]
     pub mint_a: Box<InterfaceAccount<'info, Mint>>,
 
@@ -259,18 +281,24 @@ pub struct TakeOffer<'info> {
     // offer 账户的约束比较多:
     #[account(
         mut,
-        close = maker, // 指令成功执行后, anchor 自动关闭 offer 账户, 并将其中的租金退还给 maker.
-        has_one = maker @ EscrowError::MakerMismatch, // 验证 offer.maker == maker, 防止传入错误的 maker 地址来截取资金.
-        has_one = mint_a @ EscrowError::MintMismatch, // 验证 mint_a 地址与 Offer 中记录的一致, 防止代币替换攻击.
-        has_one = mint_b @ EscrowError::MintMismatch, // 验证 mint_b 地址与 Offer 中记录的一致, 防止代币替换攻击.
-        seeds = [b"offer", offer.maker.as_ref(), &offer.offer_id.to_le_bytes()], // 验证传入的 offer 账户地址确实是合法的 PDA
-        bump = offer.bump                             // 使用存储的 bump 而非重新推导, 节省计算.
+        // 指令成功执行后, anchor 自动关闭 offer 账户, 并将其中的租金退还给 maker.
+        close = maker,
+        // 验证 offer.maker == maker, 防止传入错误的 maker 地址来截取资金.
+        has_one = maker @ EscrowError::MakerMismatch,
+        // 验证 mint_a 地址与 Offer 中记录的一致, 防止代币替换攻击.
+        has_one = mint_a @ EscrowError::MintMismatch,
+        // 验证 mint_b 地址与 Offer 中记录的一致, 防止代币替换攻击.
+        has_one = mint_b @ EscrowError::MintMismatch,
+        // 验证传入的 offer 账户地址确实是合法的 PDA
+        seeds = [b"offer", offer.maker.as_ref(), &offer.offer_id.to_le_bytes()],
+        // 使用存储的 bump 而非重新推导, 节省计算.
+        bump = offer.bump
     )]
     pub offer: Box<Account<'info, Offer>>,
 
     // taker_token_account_a 指 taker 接收代币 a 的账户:
     #[account(
-        init_if_needed, // init_if_needed: 如果 bob 还没有代币 a 的 ata, 则自动创建, 由 taker 支付创建费用.
+        init_if_needed, // 如果 bob 还没有代币 a 的 ata, 则自动创建, 由 taker 支付创建费用.
         payer = taker,
         associated_token::mint = mint_a,
         associated_token::authority = taker,
@@ -288,7 +316,9 @@ pub struct TakeOffer<'info> {
 
     // maker_token_account_b 指 alice 接收代币 b 的账户:
     #[account(
-        init_if_needed, // 同样使用 init_if_needed, alice 可能没有代币 b 的 ata, 创建费由 taker(bob)承担. 这是合理的设计, 因为是 bob 在发起交换.
+        // 同样使用 init_if_needed, alice 可能没有代币 b 的 ata,
+        // 创建费由 taker(bob)承担. 这是合理的设计, 因为是 bob 在发起交换.
+        init_if_needed,
         payer = taker,
         associated_token::mint = mint_b,
         associated_token::authority = maker,
@@ -321,7 +351,8 @@ pub fn take_offer(ctx: Context<TakeOffer>) -> Result<()> {
             from: ctx.accounts.taker_token_account_b.to_account_info(),
             to: ctx.accounts.maker_token_account_b.to_account_info(),
             mint: ctx.accounts.mint_b.to_account_info(),
-            authority: ctx.accounts.taker.to_account_info(), // authority 是 taker(bob), 由 bob 签名授权.
+            // authority 是 taker(bob), 由 bob 签名授权.
+            authority: ctx.accounts.taker.to_account_info(),
         };
 
         let cpi_context = CpiContext::new(*ctx.accounts.token_program.key, transfer_cpi_accounts);
@@ -337,13 +368,16 @@ pub fn take_offer(ctx: Context<TakeOffer>) -> Result<()> {
 // 第二步, 托管仓库将代币 mint_a 转给 bob.
 //
 // 这是本项目最关键的技术点: pda 签名.
-// 因为 offer_token_account 的 authority 是 offer pda, 而 pda 没有私钥, 不能像普通账户那样签名. Solana 允许程序代表自己派生出的 pda 进行签名.
+// 因为 offer_token_account 的 authority 是 offer pda,
+// 而 pda 没有私钥, 不能像普通账户那样签名.
+// Solana 允许程序代表自己派生出的 pda 进行签名.
 
 // 要完成这一步首先需要定义 signer_seeds, 它是用来重建 pda 签名的种子数组:
 // - 最外层 &[...]: 多个签名者的集合(这里只有一个 pda 签名者)
 // - 第二层 &[...]: 这一个签名者的全部 seeds
 // - 末尾 &[ctx.accounts.offer.bump]: canonical bump, 用于推导出正确的 pda 地址
-// > 注意: seeds 中的 ctx.accounts.offer.offer_id 是从链上账户读取的, 而不是重新从参数中读取, 因此是可信的.
+// > 注意: seeds 中的 ctx.accounts.offer.offer_id 是从链上账户读取的,
+// > 而不是重新从参数中读取, 因此是可信的.
 let signer_seeds: &[&[&[u8]]] = &[&[
     b"offer",
     ctx.accounts.offer.maker.as_ref(),
@@ -357,20 +391,23 @@ let signer_seeds: &[&[&[u8]]] = &[&[
         from: ctx.accounts.offer_token_account.to_account_info(),
         to: ctx.accounts.taker_token_account_a.to_account_info(),
         mint: ctx.accounts.mint_a.to_account_info(),
-        authority: ctx.accounts.offer.to_account_info(), // authority 是 offer 账户, 代表 offer pda 持有资金.
+        // authority 是 offer 账户, 代表 offer pda 持有资金.
+        authority: ctx.accounts.offer.to_account_info(),
     };
 
     let cpi_context = CpiContext::new(*ctx.accounts.token_program.key, transfer_cpi_accounts)
-       .with_signer(signer_seeds); // .with_signer 将 pda 签名附加到 cpi 上下文, 让 token program 认可这次转账.
+        // .with_signer 将 pda 签名附加到 cpi 上下文, 让 token program 认可这次转账.
+       .with_signer(signer_seeds);
 
     let decimals = ctx.accounts.mint_a.decimals;
-    transfer_checked(cpi_context, ctx.accounts.offer.token_a_offered_amount, decimals)?; // 执行转账
+    transfer_checked(cpi_context, ctx.accounts.offer.token_a_offered_amount, decimals)?;
 }
 ```
 
 ```rust
 // 第三步: 关闭托管代币账户, 将其持有的租金退还给 maker(alice).
-// 所谓空账户的关闭就是将其 lamports 清零并转给目标账户, 同时将数据清空, 使其不再占用链上空间.
+// 所谓空账户的关闭就是将其 lamports 清零并转给目标账户, 同时将数据清空,
+// 使其不再占用链上空间.
 // 这一步同样需要 pda 签名, 因为 offer_token_account 的 authority 是 pda.
 {
     let close_cpi_accounts = CloseAccount {
